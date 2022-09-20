@@ -9,7 +9,6 @@ services:
     env_file: .env
     volumes:
       - $PWD/mock-servers/postgres/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
-      - $PWD/mock-servers/postgres/data:/var/lib/postgresql/data
   localstack:
     image: localstack/localstack
     hostname: localstack

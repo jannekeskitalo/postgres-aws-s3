@@ -1,10 +1,10 @@
-FROM postgres:13
+FROM postgres:14
 
 RUN mkdir /tmp/extension
 WORKDIR /tmp/extension
 
 RUN apt-get update \ 
-    && apt-get -y install python3 python3-pip postgresql-plpython3-13 make
+    && apt-get -y install python3 python3-pip postgresql-plpython3-14 make
 RUN pip3 install boto3
-COPY aws_s3--0.0.1.sql aws_s3.control Makefile ./
+COPY ../../extension/* ./
 RUN make install
