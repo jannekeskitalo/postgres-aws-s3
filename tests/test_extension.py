@@ -12,6 +12,7 @@ def connection_parameters():
     ) as compose:
         db_host = compose.get_service_host("postgres", 5432)
         db_port = compose.get_service_port("postgres", 5432)
+        s3_host = compose.get_service_host("localstack", 4566)
         s3_port = compose.get_service_port("localstack", 4566)
         print(f"Postgres running at: {db_host}:{db_port}")
         time.sleep(10)
@@ -42,17 +43,20 @@ def test_installation(connection_parameters):
     assert row.extname == "aws_s3"
 
 
-def test_s3_export(connection_parameters):
+@pytest.mark.skip()
+def test_query_export_to_s3(connection_parameters):
     with psycopg2.connect(**connection_parameters["postgres"]) as connection:
         cur = connection.cursor(cursor_factory=NamedTupleCursor)
-        cur.execute("create table public.foo as select md5(random()::text) as bar from generate_series(1,100)")
-        cur.execute("select count(*) as cnt from foo")
+        cur.execute(
+            "create table public.test_query_export_to_s3 as select md5(random()::text) as bar from generate_series(1,100)"
+        )
+        cur.execute("select count(*) as cnt from public.test_query_export_to_s3")
         row = cur.fetchone()
         assert row.cnt == 100
         export_sql = f"""
         select * from
             aws_s3.query_export_to_s3(
-                'select * from public.foo',
+                'select * from public.test_query_export_to_s3',
                 'test-bucket',
                 'foo.csv',
                 'eu-west-1',
@@ -64,4 +68,29 @@ def test_s3_export(connection_parameters):
             )
         """
         cur.execute(export_sql)
-    input("Wait...")
+
+
+def test_fast_query_export_to_s3(connection_parameters):
+    with psycopg2.connect(**connection_parameters["postgres"]) as connection:
+        cur = connection.cursor(cursor_factory=NamedTupleCursor)
+        cur.execute(
+            "create table public.test_fast_query_export_to_s3 as select md5(random()::text) as bar from generate_series(1,100)"
+        )
+        cur.execute("select count(*) as cnt from public.test_fast_query_export_to_s3")
+        row = cur.fetchone()
+        assert row.cnt == 100
+        export_sql = f"""
+        select * from
+            aws_s3.fast_query_export_to_s3(
+                'select * from public.test_fast_query_export_to_s3',
+                'test-bucket',
+                'foo.csv',
+                'eu-west-1',
+                'dummy',
+                'dummy',
+                'dummy',
+                options := 'FORMAT CSV, HEADER true',
+                endpoint_url := '{connection_parameters["s3_endpoint_url"]}'
+            )
+        """
+        cur.execute(export_sql)

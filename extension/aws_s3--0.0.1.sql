@@ -144,7 +144,7 @@ AS $$
             credentials['access_key'],
             credentials['secret_key'],
             credentials['session_token'],
-	        endpoint_url
+            endpoint_url
         ]
     )[0]['num_rows']
 $$;
@@ -248,7 +248,90 @@ AS $$
             credentials.get('secret_key') if credentials else None,
             credentials.get('session_token') if credentials else None,
             options,
-	        endpoint_url
+            endpoint_url
         ]
     )
+$$;
+
+CREATE OR REPLACE FUNCTION aws_s3.multipart_query_export_to_s3(
+    query text,    
+    bucket text,    
+    file_path text,
+    region text default null,
+    access_key text default null,
+    secret_key text default null,
+    session_token text default null,
+    options text default null, 
+    endpoint_url text default null,
+    OUT rows_uploaded bigint,
+    OUT files_uploaded bigint,
+    OUT bytes_uploaded bigint
+) RETURNS SETOF RECORD
+LANGUAGE plpython3u
+AS $$
+    def cache_import(module_name):
+        module_cache = SD.get('__modules__', {})
+        if module_name in module_cache:
+            return module_cache[module_name]
+        else:
+            import importlib
+            _module = importlib.import_module(module_name)
+            if not module_cache:
+                SD['__modules__'] = module_cache
+            module_cache[module_name] = _module
+            return _module
+
+    # Imports
+    boto3 = cache_import('boto3')
+    concurrent_futures = cache_import('concurrent.futures')
+    io = cache_import('io')
+    csv = cache_import('csv')
+    codecs = cache_import('codecs')
+    
+    plan = plpy.prepare("select name, current_setting('aws_s3.' || name, true) as value from (select unnest(array['access_key_id', 'secret_access_key', 'session_token', 'endpoint_url']) as name) a");
+    default_aws_settings = {
+        row['name']: row['value']
+        for row in plan.execute()
+    }
+
+    aws_settings = {
+        'aws_access_key_id': access_key if access_key else default_aws_settings.get('access_key_id', 'unknown'),
+        'aws_secret_access_key': secret_key if secret_key else default_aws_settings.get('secret_access_key', 'unknown'),
+        'aws_session_token': session_token if session_token else default_aws_settings.get('session_token'),
+        'endpoint_url': endpoint_url if endpoint_url else default_aws_settings.get('endpoint_url')
+    }
+
+    s3 = boto3.client(
+        's3',
+        region_name=region,
+        **aws_settings
+    )
+    
+    plan = plpy.prepare(query)
+    result = plpy.execute(plan, [], 1)
+    cols = result.colnames()
+    cursor = plpy.cursor(plan)
+    StreamWriter = codecs.getwriter('utf-8')
+    mpu = s3.create_multipart_upload(Bucket=bucket, Key=file_path)
+    part_number = 0
+    parts = {"Parts": []}
+    while True:
+        rows = cursor.fetch(500000)
+        if not rows:
+            break
+        else:
+            buffer = io.BytesIO()
+            buffer_wrapper = StreamWriter(buffer)
+            writer = csv.DictWriter(buffer_wrapper, cols)
+            part_number += 1
+            for row in rows:
+                writer.writerow(row)
+            buffer.seek(0,2)
+            buffer_size = buffer.tell()
+            buffer.seek(0, 0)
+            plpy.info(f"Upload part: {part_number}, size: {buffer_size}")
+            part = s3.upload_part(Bucket=bucket, Key=file_path, PartNumber=part_number, UploadId=mpu['UploadId'], Body=buffer)
+            parts["Parts"].append({"PartNumber": part_number, "ETag": part['ETag']})
+    s3.complete_multipart_upload(Bucket=bucket, Key=file_path, UploadId=mpu['UploadId'], MultipartUpload=parts)
+    yield (0, 0, 0)
 $$;
