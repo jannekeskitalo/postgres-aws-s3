@@ -50,9 +50,6 @@ def test_query_export_to_s3(connection_parameters):
         cur.execute(
             "create table public.test_query_export_to_s3 as select md5(random()::text) as bar from generate_series(1,100)"
         )
-        cur.execute("select count(*) as cnt from public.test_query_export_to_s3")
-        row = cur.fetchone()
-        assert row.cnt == 100
         export_sql = f"""
         select * from
             aws_s3.query_export_to_s3(
@@ -70,19 +67,16 @@ def test_query_export_to_s3(connection_parameters):
         cur.execute(export_sql)
 
 
-def test_fast_query_export_to_s3(connection_parameters):
+def test_multipart_query_export_to_s3(connection_parameters):
     with psycopg2.connect(**connection_parameters["postgres"]) as connection:
         cur = connection.cursor(cursor_factory=NamedTupleCursor)
         cur.execute(
-            "create table public.test_fast_query_export_to_s3 as select md5(random()::text) as bar from generate_series(1,100)"
+            "create table public.test_multipart_query_export_to_s3 as select md5(random()::text) as bar from generate_series(1,1000000)"
         )
-        cur.execute("select count(*) as cnt from public.test_fast_query_export_to_s3")
-        row = cur.fetchone()
-        assert row.cnt == 100
         export_sql = f"""
         select * from
-            aws_s3.fast_query_export_to_s3(
-                'select * from public.test_fast_query_export_to_s3',
+            aws_s3.multipart_query_export_to_s3(
+                'select * from public.test_multipart_query_export_to_s3',
                 'test-bucket',
                 'foo.csv',
                 'eu-west-1',
