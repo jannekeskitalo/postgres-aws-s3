@@ -28,15 +28,8 @@ def connection_parameters():
         }
 
 
-def install_extension(connection):
-    cur = connection.cursor(cursor_factory=NamedTupleCursor)
-    cur.execute("create extension plpython3u")
-    cur.execute("create extension aws_s3")
-
-
 def test_installation(connection_parameters):
     with psycopg2.connect(**connection_parameters["postgres"]) as connection:
-        install_extension(connection)
         cur = connection.cursor(cursor_factory=NamedTupleCursor)
         cur.execute("select * from pg_extension where extname = 'aws_s3'")
         row = cur.fetchone()
@@ -88,3 +81,4 @@ def test_multipart_query_export_to_s3(connection_parameters):
             )
         """
         cur.execute(export_sql)
+        input()

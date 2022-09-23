@@ -314,24 +314,30 @@ AS $$
     StreamWriter = codecs.getwriter('utf-8')
     mpu = s3.create_multipart_upload(Bucket=bucket, Key=file_path)
     part_number = 0
-    parts = {"Parts": []}
-    while True:
-        rows = cursor.fetch(500000)
-        if not rows:
-            break
-        else:
-            buffer = io.BytesIO()
-            buffer_wrapper = StreamWriter(buffer)
-            writer = csv.DictWriter(buffer_wrapper, cols)
-            part_number += 1
-            for row in rows:
-                writer.writerow(row)
-            buffer.seek(0,2)
-            buffer_size = buffer.tell()
-            buffer.seek(0, 0)
-            plpy.info(f"Upload part: {part_number}, size: {buffer_size}")
-            part = s3.upload_part(Bucket=bucket, Key=file_path, PartNumber=part_number, UploadId=mpu['UploadId'], Body=buffer)
-            parts["Parts"].append({"PartNumber": part_number, "ETag": part['ETag']})
-    s3.complete_multipart_upload(Bucket=bucket, Key=file_path, UploadId=mpu['UploadId'], MultipartUpload=parts)
+    part_futures = []
+    part_numbers = []
+    with concurrent_futures.ThreadPoolExecutor(max_workers=5) as executor:
+        while True:
+            rows = cursor.fetch(500000)
+            if not rows:
+                break
+            else:
+                buffer = io.BytesIO()
+                buffer_wrapper = StreamWriter(buffer)
+                writer = csv.DictWriter(buffer_wrapper, cols)
+                part_number += 1
+                for row in rows:
+                    writer.writerow(row)
+                buffer.seek(0,2)
+                buffer_size = buffer.tell()
+                buffer.seek(0, 0)
+                plpy.info(f"Upload part: {part_number}, size: {buffer_size}")
+                part_numbers.append(part_number)
+                part_futures.append(executor.submit(s3.upload_part, Bucket=bucket, Key=file_path, PartNumber=part_number, UploadId=mpu['UploadId'], Body=buffer))
+        parts_completed = {"Parts": []}
+        for i, f in enumerate(concurrent_futures.as_completed(part_futures)):
+            part = f.result()
+            parts_completed["Parts"].append({"PartNumber": part_numbers[i], "ETag": part['ETag']})
+        s3.complete_multipart_upload(Bucket=bucket, Key=file_path, UploadId=mpu['UploadId'], MultipartUpload=parts_completed)
     yield (0, 0, 0)
 $$;
