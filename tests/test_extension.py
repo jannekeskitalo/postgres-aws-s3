@@ -72,13 +72,12 @@ def test_multipart_query_export_to_s3(connection_parameters):
                 'select * from public.test_multipart_query_export_to_s3',
                 'test-bucket',
                 'foo.csv',
+                250000,
                 'eu-west-1',
                 'dummy',
                 'dummy',
                 'dummy',
-                options := 'FORMAT CSV, HEADER true',
                 endpoint_url := '{connection_parameters["s3_endpoint_url"]}'
             )
         """
         cur.execute(export_sql)
-        input()

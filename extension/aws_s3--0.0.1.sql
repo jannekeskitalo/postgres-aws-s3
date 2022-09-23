@@ -257,11 +257,11 @@ CREATE OR REPLACE FUNCTION aws_s3.multipart_query_export_to_s3(
     query text,    
     bucket text,    
     file_path text,
+    part_rows int default 1000000,
     region text default null,
     access_key text default null,
     secret_key text default null,
     session_token text default null,
-    options text default null, 
     endpoint_url text default null,
     OUT rows_uploaded bigint,
     OUT files_uploaded bigint,
@@ -314,11 +314,15 @@ AS $$
     StreamWriter = codecs.getwriter('utf-8')
     mpu = s3.create_multipart_upload(Bucket=bucket, Key=file_path)
     part_number = 0
-    part_futures = []
-    part_numbers = []
+    parts = {}
+    row_count = 0
+    byte_count = 0
     with concurrent_futures.ThreadPoolExecutor(max_workers=5) as executor:
         while True:
-            rows = cursor.fetch(500000)
+            # Note! Part size must be >5MB
+            # Fetch enough rows to meet that
+            # Otherwise there will be exception to complete upload
+            rows = cursor.fetch(part_rows)
             if not rows:
                 break
             else:
@@ -332,12 +336,18 @@ AS $$
                 buffer_size = buffer.tell()
                 buffer.seek(0, 0)
                 plpy.info(f"Upload part: {part_number}, size: {buffer_size}")
-                part_numbers.append(part_number)
-                part_futures.append(executor.submit(s3.upload_part, Bucket=bucket, Key=file_path, PartNumber=part_number, UploadId=mpu['UploadId'], Body=buffer))
+                row_count += len(rows)
+                byte_count += buffer_size
+                part = executor.submit(s3.upload_part, Bucket=bucket, Key=file_path, PartNumber=part_number, UploadId=mpu['UploadId'], Body=buffer)
+                parts[part] = part_number
+                plpy.info(f"Submitted: {part} - {part_number}")
         parts_completed = {"Parts": []}
-        for i, f in enumerate(concurrent_futures.as_completed(part_futures)):
+        parts_futures = [part_future for part_future in parts]
+        for f in concurrent_futures.as_completed(parts_futures):
             part = f.result()
-            parts_completed["Parts"].append({"PartNumber": part_numbers[i], "ETag": part['ETag']})
+            plpy.info(f"Completed: {f} - {parts[f]}")
+            parts_completed["Parts"].append({"PartNumber": parts[f], "ETag": part['ETag']})
+        parts_completed["Parts"] = sorted(parts_completed["Parts"], key=lambda x: x["PartNumber"])
         s3.complete_multipart_upload(Bucket=bucket, Key=file_path, UploadId=mpu['UploadId'], MultipartUpload=parts_completed)
-    yield (0, 0, 0)
+    yield (row_count, len(parts_completed["Parts"]), byte_count)
 $$;
