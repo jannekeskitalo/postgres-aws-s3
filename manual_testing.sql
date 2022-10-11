@@ -13,10 +13,10 @@ aws_s3.multipart_query_export_to_s3(
     'select * from public.test_fast_query_export_to_s3',
     'test-bucket',
     'foo.csv',
+    167000,
     'eu-west-1',
     'dummy',
     'dummy',
     'dummy',
-    options := 'FORMAT CSV, HEADER true',
     endpoint_url := 'http://localstack:4566'
 );

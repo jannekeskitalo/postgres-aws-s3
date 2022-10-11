@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION aws_s3.fast_query_export_to_s3(
+CREATE OR REPLACE FUNCTION aws_s3.fifo_query_export_to_s3(
     query text,    
     bucket text,    
     file_path text,
